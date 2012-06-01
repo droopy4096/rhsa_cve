@@ -225,7 +225,9 @@ class CveRhsaAnalyzer(object):
 #  done 
 #===============================================================================
     
-    def analyze(self,cve=None,cpe=None,rhsa2cve=None):
+    def cve_compliance_report(self,cve=None,cpe=None,rhsa2cve=None):
+        """Currently map out CVE->RHSA with attached package names affected"""
+        #TODO add ability to generate package->CVE list for automated checking  
         rev_map={}
         for rhsa in rhsa2cve.keys():
             cve_list=rhsa2cve[rhsa]['CVE']
@@ -249,7 +251,13 @@ class CveRhsaAnalyzer(object):
             else:
                 print(cve_name,"NOT FIXED")
         
-        
+    def package_cve_map(self,cve,cpe,rhsa2cve):
+        """create a list of packages with CVE items to check"""
+        # we need something we can use for meta-loop:
+        # for p in packages:
+        #   login to server
+        #   rpm --changelog -q $p | grep $cve 
+        raise "NotImplemented"
 
 
 def main(argv):
@@ -302,28 +310,9 @@ def main(argv):
     rhsa.load(rhsa2cve_filename)
     
     cr=CveRhsaAnalyzer()
-    cr.analyze(cve, cpe, rhsa)
-
+    cr.cve_compliance_report(cve, cpe, rhsa)
+    cr.package_cve_map(cve, cpe, rhsa)
 
 if __name__ == '__main__':
     main(sys.argv)
 
-
-##### SHELL ######
-#===============================================================================
-# 
-# echo ""> $fixed_list
-# # we need line #3 with header...
-# sed -n '3p' ${cve_csv} > $failed_csv
-# 
-# for cve in $(cat ${cve_candidates}) 
-#  do 
-#   if grep $cve ${rhsa2cve_file} >> $fixed_list 
-#      then
-#        echo "===> $cve OK"
-#      else
-#        echo "===> $cve FAILED"
-#        grep $cve ${cve_csv} >> $failed_csv
-#   fi
-#  done 
-#===============================================================================

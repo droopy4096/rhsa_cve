@@ -54,6 +54,79 @@ class MissingArguments(object):
     def __str__(self):
         return self.text
 
+class Rhsa2CveMap(UserDict):
+
+    _filter=None
+    _cpe_filter=None
+    
+    def __init__(self,filename=None):
+        UserDict.__init__(self)
+        if filename:
+            self.load(filename)
+        self._filter=None
+
+    def setLoadFilter(self,filter):
+        """List only items that match filter"""
+        self._filter=filter
+
+    def setLoadCPEFilter(self,filter):
+        """List only items that fuzzy-match filter:
+        start with the same string"""
+        self._cpe_filter=filter
+
+
+
+    def load(self,filename):
+        if self._filter:
+            # set is going to be better in managing tasks we have at hand
+            filter_set=set(self._filter)
+        else:
+            filter_set=False
+        
+        with open(filename,'r') as f:
+            for line in f:
+                (rhsa,cve_list,cpe_list)=line.split()
+                rhsa_dict={}
+                cve=cve_list.split(',')
+                if self._filter:
+                    cve_set=set(cve)
+                    if filter_set.isdisjoint(cve_set):
+                        continue
+                    else:
+                        cve=list(cve_set.intersection(filter_set))
+                    
+                cpe=[]
+                cpe_raw=cpe_list.split(',')
+                for c in cpe_raw:
+                    # print(c)
+                    filterOut=True
+                    if self._cpe_filter:
+                        for cf in self._cpe_filter:
+                            if c[:len(cf)] == cf:
+                                filterOut=False
+                                print('Found {0} matching {1}'.format(c,cf))
+                                break
+                    else:
+                        filterOut=False
+                    if filterOut:
+                        continue
+                    elements=c.split(':')
+                    try:
+                        ed,package=elements[-1].split('/')
+                    except ValueError:
+                        ed=elements[-1]
+                        package=None
+                        print("ERROR: can't parse: ",c)
+                        continue
+                    t=elements[:-1]+[ed]
+                    cpe_lookup=":".join(t)
+                    cpe_dict={'base':cpe_lookup,'uri':c,'package':package}
+                    cpe.append(cpe_dict)
+                    
+                rhsa_dict['CPE']=cpe
+                rhsa_dict['CVE']=cve
+                self.data[rhsa]=rhsa_dict
+
 class CVEList(UserDict):
     _filter=None
     def __init__(self,filename=None):
@@ -64,7 +137,7 @@ class CVEList(UserDict):
         self._filter=None
         self._ref_re=re.compile(r' +\| +')
 
-    def setFilter(self,filter):
+    def setLoadFilter(self,filter):
         """List only items that match filter"""
         self._filter=filter
 
@@ -78,8 +151,6 @@ class CVEList(UserDict):
         
 
     def _load(self,file):
-        # with cve_csv_gz, rhsa2cve:
-        #      .....
         reader=csv.reader(file)
         ## 1. read line #3  for field names
         ## 2. read the rest of the file after empty line
@@ -109,11 +180,16 @@ class CVEList(UserDict):
 
 class CPEDict(UserDict):
     """CPE dictionary object"""
-    
+    _filter=None
     def __init__(self,filename=None):
         UserDict.__init__(self)
         if filename:
             self.load(filename)
+            
+        self._filter=None
+
+    def setLoadFilter(self,filter):
+        self._filter=filter
         
     def load(self,filename):
         # cpe_tree=ElementTree()
@@ -126,51 +202,55 @@ class CPEDict(UserDict):
             ci_title_elem=ci.getElementsByTagName('title')[0]
             self.data[ci.getAttribute("name")]=ci_title_elem.firstChild.nodeValue
             
-class Analizer(object):
-    cve_csv_filename=None
-    cve_csv_file=None
+class CveRhsaAnalyzer(object):
+    def __init__(self):
+        pass
 
-    cve_csv_gz_filename=None
-    cve_csv_gz_file=None
-
-    cve_csv_reader=None
-
-    rhsa2cve_filename=None
-    rhsa2cve_file=None
-
-    cpe_dict_filename=None
-    cpe_dict_file=None
-
-    def __init__(self,cve_csv=None,cve_csv_gz=None,rhsa2cve=None,cpe_dict=None):
-        if not cve_csv_gz is None:
-            self.set_cve_csv_gz(cve_csv_gz)
-        elif not cve_csv is None:
-            self.set_cve_csv(cve_csv)
-        if None in (rhsa2cve,cpe_dict):
-            raise MissingArguments('not enough arguments passed to __init__')
-
-    def set_cve_csv(self,cve_csv):
-        cve_csv_file=open(cve_csv,'r')
-        self.cve_csv_reader=csv.reader(cve_csv_file)
-        self.cve_csv_file=cve_csv_file
-        self.cve_csv_filename=cve_csv
+##### SHELL ######
+#===============================================================================
+# 
+# echo ""> $fixed_list
+# # we need line #3 with header...
+# sed -n '3p' ${cve_csv} > $failed_csv
+# 
+# for cve in $(cat ${cve_candidates}) 
+#  do 
+#   if grep $cve ${rhsa2cve_file} >> $fixed_list 
+#      then
+#        echo "===> $cve OK"
+#      else
+#        echo "===> $cve FAILED"
+#        grep $cve ${cve_csv} >> $failed_csv
+#   fi
+#  done 
+#===============================================================================
+    
+    def analyze(self,cve=None,cpe=None,rhsa2cve=None):
+        rev_map={}
+        for rhsa in rhsa2cve.keys():
+            cve_list=rhsa2cve[rhsa]['CVE']
+            for c in cve_list:
+                if rev_map.has_key(c):
+                    rev_map[c].append(rhsa)
+                else:
+                    rev_map[c]=[rhsa]
+            # print(rhsa, ",".join(cve_list))
             
-    def set_cve_csv_gz(self,cve_csv_gz):
-        cve_csv_gz_file=gzip.open(cve_csv_gz,'r')
-        # with cve_csv_gz, rhsa2cve:
-        #      .....
-        self.cve_csv_reader=csv.reader(cve_csv_gz_file)
-        self.cve_csv_gz_file=cve_csv_gz_file
-        self.cve_csv_gz_filename=cve_csv_gz
+        for cve_name in cve.keys():
+            if rev_map.has_key(cve_name):
+                rev_lookup=rev_map[cve_name]
+                # print(rev_lookup)
+                pkg_list=set()
+                for r in rev_lookup:
+                    cpe_list=rhsa2cve[r]['CPE']
+                    for cpe_item in cpe_list:
+                        pkg_list.add(cpe_item['package'])
+                print(cve_name,",".join(rev_lookup),",".join(pkg_list))
+            else:
+                print(cve_name,"NOT FIXED")
+        
+        
 
-    def set_rhsa2cve(self,rhsa2cve):
-        self.rhsa2cve_filename=rhsa2cve
-        self.rhsa2cve_file=open(rhsa2cve,'r')
-
-    def set_cpe_dict(self,cpe_dict):
-        self.cpe_dict_filename=cpe_dict
-        ##XXX now we need to open this XML and extract dictionary of 
-        ##XXX CPE descriptors
 
 def main(argv):
     parser = argparse.ArgumentParser(description='RHSA & CVE cross-reference tool')
@@ -214,17 +294,15 @@ def main(argv):
     
     cpe=CPEDict(cpe_dict_filename)
     cve=CVEList()
-    cve.setFilter(cve_filter)
+    cve.setLoadFilter(cve_filter)
     cve.load_gz(cve_csv_gz_filename)
-    print(cve)
-    return
-
-    rhsa2cve=open(rhsa2cve_filename,'r')
-    # with cve_csv_gz, rhsa2cve:
-    #      .....
-
-
-    rhsa2cve.close()
+    rhsa=Rhsa2CveMap()
+    rhsa.setLoadFilter(cve_filter)
+    # rhsa.setLoadCPEFilter(['cpe:/o:redhat:enterprise_linux'])
+    rhsa.load(rhsa2cve_filename)
+    
+    cr=CveRhsaAnalyzer()
+    cr.analyze(cve, cpe, rhsa)
 
 
 if __name__ == '__main__':

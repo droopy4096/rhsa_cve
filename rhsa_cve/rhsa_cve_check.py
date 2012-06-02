@@ -104,7 +104,7 @@ class Rhsa2CveMap(UserDict):
                         for cf in self._cpe_filter:
                             if c[:len(cf)] == cf:
                                 filterOut=False
-                                print('Found {0} matching {1}'.format(c,cf))
+                                ##DEBUG print('Found {0} matching {1}'.format(c,cf))
                                 break
                     else:
                         filterOut=False
@@ -290,6 +290,8 @@ class CheckApplication(object):
         parser = argparse.ArgumentParser(description='RHSA & CVE cross-reference tool')
         parser.add_argument('cve_candidates',type=str,help="name of the file listing CVE's",
                              metavar='<cve_list_file>', default=None)
+        parser.add_argument('--cpe-filter',type=str,help="comma-delimited CPE URI filters",
+                            required=False,default=None)
         return parser
 
     def setupFiles(self):
@@ -321,11 +323,15 @@ class CheckApplication(object):
          
         parser=self.createParser()
         args = parser.parse_args(argv[1:])
+        cpe_filter=None
 
         if args.cve_candidates:
             self._cve_candidates_filename=args.cve_candidates
         else:
             self._cve_candidates_filename='need_to_fix'
+            
+        if args.cpe_filter:
+            cpe_filter=args.cpe_filter.split(',')
             
         (cve_csv_gz_filename,rhsa2cve_filename,cpe_dict_filename)=self.setupFiles()
 
@@ -342,7 +348,9 @@ class CheckApplication(object):
         cve.load_gz(cve_csv_gz_filename)
         rhsa=Rhsa2CveMap()
         rhsa.setLoadFilter(cve_filter)
-        # rhsa.setLoadCPEFilter(['cpe:/o:redhat:enterprise_linux'])
+        if cpe_filter:
+            # rhsa.setLoadCPEFilter(['cpe:/o:redhat:enterprise_linux'])
+            rhsa.setLoadCPEFilter(cpe_filter)
         rhsa.load(rhsa2cve_filename)
         
         self._cpe_dict=cpe
@@ -369,27 +377,9 @@ class CheckApplication(object):
                 print(cve_id,'NOT FIXED')
                 
         pkg_cve=cr.get_package_cve_map(report)
-        print(pkg_cve)
+        for pkg in pkg_cve.keys():
+            print(pkg,",".join(pkg_cve[pkg]))
 
-##### SHELL ######
-#===============================================================================
-# 
-# echo ""> $fixed_list
-# # we need line #3 with header...
-# sed -n '3p' ${cve_csv} > $failed_csv
-# 
-# for cve in $(cat ${cve_candidates}) 
-#  do 
-#   if grep $cve ${rhsa2cve_file} >> $fixed_list 
-#      then
-#        echo "===> $cve OK"
-#      else
-#        echo "===> $cve FAILED"
-#        grep $cve ${cve_csv} >> $failed_csv
-#   fi
-#  done 
-#===============================================================================
-        
     def createCveReportFiles(self,cra=None,cve_report=None):
         (cve,rhsa,cpe)=(self._cve_dict,self._rhsa2cve_dict,self._cpe_dict)
 

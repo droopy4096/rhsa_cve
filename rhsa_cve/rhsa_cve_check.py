@@ -225,8 +225,9 @@ class CveRhsaAnalyzer(object):
 #  done 
 #===============================================================================
     
-    def cve_compliance_report(self,cve=None,cpe=None,rhsa2cve=None):
-        """Currently map out CVE->RHSA with attached package names affected"""
+    def get_cve_compliance_report(self,cve=None,cpe=None,rhsa2cve=None):
+        """Currently map out CVE->RHSA with attached package names affected
+        Returns tuple: (CVE-ID:str,Fixed:bool,RHSA:list,pkg_list:list)"""
         #TODO add ability to generate package->CVE list for automated checking  
         rev_map={}
         for rhsa in rhsa2cve.keys():
@@ -237,7 +238,7 @@ class CveRhsaAnalyzer(object):
                 else:
                     rev_map[c]=[rhsa]
             # print(rhsa, ",".join(cve_list))
-            
+        report=[]
         for cve_name in cve.keys():
             if rev_map.has_key(cve_name):
                 rev_lookup=rev_map[cve_name]
@@ -247,9 +248,12 @@ class CveRhsaAnalyzer(object):
                     cpe_list=rhsa2cve[r]['CPE']
                     for cpe_item in cpe_list:
                         pkg_list.add(cpe_item['package'])
-                print(cve_name,",".join(rev_lookup),",".join(pkg_list))
+                # print(cve_name,",".join(rev_lookup),",".join(pkg_list))
+                report.append((cve_name,True,rev_lookup,pkg_list))
             else:
-                print(cve_name,"NOT FIXED")
+                # print(cve_name,"NOT FIXED")
+                report.append((cve_name,False,(),()))
+        return report
         
     def package_cve_map(self,cve,cpe,rhsa2cve):
         """create a list of packages with CVE items to check"""
@@ -310,7 +314,13 @@ def main(argv):
     rhsa.load(rhsa2cve_filename)
     
     cr=CveRhsaAnalyzer()
-    cr.cve_compliance_report(cve, cpe, rhsa)
+    report=cr.get_cve_compliance_report(cve, cpe, rhsa)
+    for (cve_id,status,rhsa_list,pkg_list) in report:
+        if status:
+            print(cve_id,",".join(rhsa_list),",".join(pkg_list))
+        else:
+            print(cve_id,'NOT FIXED')
+            
     cr.package_cve_map(cve, cpe, rhsa)
 
 if __name__ == '__main__':

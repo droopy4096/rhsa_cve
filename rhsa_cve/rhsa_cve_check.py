@@ -54,6 +54,28 @@ class MissingArguments(object):
     def __str__(self):
         return self.text
 
+class NoFlagDefined(object):
+    def __init__(self,text):
+        self.text=text
+    def __str__(self):
+        return self.text
+
+class Flags(object):
+    _flags=None
+    def __init__(self):
+        self._flags={}
+    
+    def __getattr__(self,name):
+        if self._flags.has_key(name):
+            return self._flags[name]
+        else:
+            raise NoFlagDefined(name)
+        
+    def __setattr__(self,name,value):
+        if name=='_flags':
+            object.__setattr__(self, name, value)
+        self._flags[name]=value
+
 class Rhsa2CveMap(UserDict):
 
     _filter=None
@@ -278,6 +300,8 @@ class CveRhsaAnalyzer(object):
 
 class CheckApplication(object):
 
+    ############# Private properties ##########
+    
     _cve_candidates_filename=None
     _cve_dict=None
     _cpe_dict=None
@@ -285,14 +309,34 @@ class CheckApplication(object):
 
     _failed_csv_filename=None
     _fixed_list_filename=None
+    
+    _cpe_filter=None
+    _cve_filter=None
+    
+    _app_flags=None
+    _app_args=None
+    _app_parser=None
 
-    def createParser(self):
-        parser = argparse.ArgumentParser(description='RHSA & CVE cross-reference tool')
-        parser.add_argument('cve_candidates',type=str,help="name of the file listing CVE's",
-                             metavar='<cve_list_file>', default=None)
-        parser.add_argument('--cpe-filter',type=str,help="comma-delimited CPE URI filters",
-                            required=False,default=None)
-        return parser
+
+    ############# Public Properties ###########
+    
+    @property
+    def cve(self):
+        return self._cve_dict
+    
+    @property
+    def cpe(self):
+        return self._cpe_dict
+    
+    @property
+    def rhsa2cve(self):
+        return self._rhsa2cve_dict
+
+    @property
+    def flags(self):
+        return self._app_flags
+    
+    ############# Methods ############### 
 
     def setupFiles(self):
         today=datetime.date.today()
@@ -318,12 +362,28 @@ class CheckApplication(object):
         fetch(RHSA_MAP_CPE_TXT_URL,rhsa2cve_filename)
         fetch(CPE_DICT_URL,cpe_dict_filename)
         return (cve_csv_gz_filename,rhsa2cve_filename,cpe_dict_filename)
+
+    def createParser(self):
+        parser = argparse.ArgumentParser(description='RHSA & CVE cross-reference tool')
+        parser.add_argument('cve_candidates',type=str,help="name of the file listing CVE's",
+                             metavar='<cve_list_file>', default=None)
+        parser.add_argument('--cpe-filter',type=str,help="comma-delimited CPE URI filters",
+                            required=False,default=None)
+        parser.add_argument('--print-packages','-p',help="Print list of packages involved",action='store_const',
+                            const=True,default=False,required=False)
+        parser.add_argument('--print-brief','-b',help="Print brief general report",action='store_const',
+                            const=True,default=False,required=False)
+        parser.add_argument('--compile-failed','-F',help="Compile list of failed entries",action='store_const',
+                            const=True,default=False,required=False)
+        parser.add_argument('--compile-fixed','-f',help="Compile list of addressed entries",action='store_const',
+                            const=True,default=False,required=False)
+
+        self._app_parser=parser
+        return self._app_parser
         
-    def __init__(self,argv):
-         
-        parser=self.createParser()
-        args = parser.parse_args(argv[1:])
-        cpe_filter=None
+    def _parseArgs(self,argv):
+        args = self._app_parser.parse_args(argv)
+        self._app_args=args
 
         if args.cve_candidates:
             self._cve_candidates_filename=args.cve_candidates
@@ -331,8 +391,24 @@ class CheckApplication(object):
             self._cve_candidates_filename='need_to_fix'
             
         if args.cpe_filter:
-            cpe_filter=args.cpe_filter.split(',')
+            self._cpe_filter=args.cpe_filter.split(',')
+            self.flags.cpe_filtered=True
+        else:
+            self._cpe_filter=()
+            self.flags.cpe_filtered=False
             
+        self.flags.print_package_report=args.print_packages
+        self.flags.print_brief_report=args.print_brief
+        self.flags.compile_failed=args.compile_failed
+        self.flags.compile_fixed=args.compile_fixed
+
+    def __init__(self,argv):
+         
+        self._app_flags=Flags()
+        self.createParser()
+
+        self._parseArgs(argv[1:])
+        
         (cve_csv_gz_filename,rhsa2cve_filename,cpe_dict_filename)=self.setupFiles()
 
         with open(self._cve_candidates_filename,'r') as f:
@@ -340,74 +416,89 @@ class CheckApplication(object):
         
         # all we have to do is split giant string
         # into CVE items:
-        cve_filter=cve_list_str.split()
+        self._cve_filter=cve_list_str.split()
 
         cpe=CPEDict(cpe_dict_filename)
         cve=CVEList()
-        cve.setLoadFilter(cve_filter)
+        cve.setLoadFilter(self._cve_filter)
         cve.load_gz(cve_csv_gz_filename)
         rhsa=Rhsa2CveMap()
-        rhsa.setLoadFilter(cve_filter)
-        if cpe_filter:
+        rhsa.setLoadFilter(self._cve_filter)
+        if self.flags.cpe_filtered:
             # rhsa.setLoadCPEFilter(['cpe:/o:redhat:enterprise_linux'])
-            rhsa.setLoadCPEFilter(cpe_filter)
+            rhsa.setLoadCPEFilter(self._cpe_filter)
         rhsa.load(rhsa2cve_filename)
         
         self._cpe_dict=cpe
         self._cve_dict=cve
         self._rhsa2cve_dict=rhsa
 
-        
-    def printCveReport(self,cra=None,cve_report=None):
-        (cve,rhsa,cpe)=(self._cve_dict,self._rhsa2cve_dict,self._cpe_dict)
+    def execApp(self):
+        # (cve,rhsa,cpe)=(self._cve_dict,self._rhsa2cve_dict,self._cpe_dict)
 
-        if cra:
-            cr=cra
-        else:
-            cr=CveRhsaAnalyzer(cve,rhsa,cpe)
-        
-        if cve_report:
-            report=cve_report
-        else:
-            report=cr.get_cve_compliance_report()
-        for (cve_id,status,rhsa_list,pkg_list) in report:
+        cr=CveRhsaAnalyzer(self.cve,self.rhsa2cve,self.cpe)
+        report=cr.get_cve_compliance_report()
+
+        self.printReports(cr,report)
+        self.createCveReportFiles(cr, report)
+
+    def printBriefReport(self, report):
+        for cve_id, status, rhsa_list, pkg_list in report:
             if status:
-                print(cve_id,",".join(rhsa_list),",".join(pkg_list))
+                print( cve_id, ",".join(rhsa_list), ",".join(pkg_list))
             else:
-                print(cve_id,'NOT FIXED')
-                
-        pkg_cve=cr.get_package_cve_map(report)
+                print( cve_id, 'NOT FIXED')
+
+    def printPackageReport(self, cr, report):
+        pkg_cve = cr.get_package_cve_map(report)
         for pkg in pkg_cve.keys():
-            print(pkg,",".join(pkg_cve[pkg]))
+            print( pkg, ",".join(pkg_cve[pkg]))
 
-    def createCveReportFiles(self,cra=None,cve_report=None):
-        (cve,rhsa,cpe)=(self._cve_dict,self._rhsa2cve_dict,self._cpe_dict)
-
+    def _processDefaults(self, cra, cve_report):
+        """Helper method to set up CveRhsaAnalyzer and produce
+        cve_compliance_report for further processing as needed"""
         if cra:
-            cr=cra
+            cr = cra
         else:
-            cr=CveRhsaAnalyzer(cve,rhsa,cpe)
-        
+            cr = CveRhsaAnalyzer(self.cve, self.rhsa2cve, self.cpe)
         if cve_report:
-            report=cve_report
+            report = cve_report
         else:
-            report=cr.get_cve_compliance_report()
-            
-        writer=csv.writer(open(self._failed_csv_filename, 'wb'),quoting=csv.QUOTE_NONNUMERIC)
-        writer.writerow(["Name","Status","Description","Phase","Comments"])
-        for (cve_id,status,rhsa_list,pkg_list) in report:
+            report = cr.get_cve_compliance_report()
+        return report, cr
+
+    def printReports(self,cra=None,cve_report=None):
+        report, cr = self._processDefaults(cra, cve_report)
+
+        if self.flags.print_brief_report:
+            self.printBriefReport(report)
+        if self.flags.print_package_report:
+            self.printPackageReport(cr, report)
+
+    def createFailedFile(self, report):
+        writer = csv.writer(open(self._failed_csv_filename, 'wb'), quoting=csv.QUOTE_NONNUMERIC)
+        writer.writerow(["Name", "Status", "Description", "Phase", "Comments"])
+        for cve_id, status, rhsa_list, pkg_list in report:
             if not status:
-                cve_item=cve[cve_id]
-                writer.writerow((cve_id,cve_item["Status"],cve_item["Description"],cve_item["Phase"],cve_item["Comments"]))
+                cve_item = self.cve[cve_id]
+                writer.writerow((cve_id, cve_item["Status"], cve_item["Description"], cve_item["Phase"], cve_item["Comments"]))
         
+    def createFixedFile(self,report):
         with open(self._fixed_list_filename,'w') as f:
             for (cve_id,status,rhsa_list,pkg_list) in report:
                 if status:
                     print(cve_id,",".join(rhsa_list),",".join(pkg_list),file=f)
         
+    def createCveReportFiles(self,cra=None,cve_report=None):
+        report, cr = self._processDefaults(cra, cve_report)
+            
+        if self.flags.compile_failed:
+            self.createFailedFile(report)
+        if self.flags.compile_fixed:
+            self.createFixedFile(report)
+        
 
 if __name__ == '__main__':
     ca=CheckApplication(sys.argv)
-    ca.printCveReport()
-    ca.createCveReportFiles()
+    ca.execApp()
 

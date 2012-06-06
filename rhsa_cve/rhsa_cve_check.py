@@ -304,11 +304,16 @@ class CheckApplication(object):
     
     _cve_candidates_filename=None
     _cve_dict=None
+    _cve_dict_filename=None
     _cpe_dict=None
+    _cpe_dict_filename=None
     _rhsa2cve_dict=None
+    _rhsa2cve_dict_filename=None
 
     _failed_csv_filename=None
     _fixed_list_filename=None
+    _check_script_filename=None
+    
     
     _cpe_filter=None
     _cve_filter=None
@@ -338,30 +343,38 @@ class CheckApplication(object):
     
     ############# Methods ############### 
 
-    def setupFiles(self):
+    def setDefaults(self):
         today=datetime.date.today()
         today_str=today.strftime('%Y-%m-%d')
-        cve_csv_filename='cve-allitems-'+today_str+'.csv'
-        cve_csv_gz_filename='cve-allitems-'+today_str+'.csv.gz'
-        rhsa2cve_filename='rhsamapcpe-'+today_str+'.txt'
-        cpe_dict_filename='cpe-dictionary.xml'
+
+        self._cve_dict_filename='cve-allitems-'+today_str+'.csv.gz'
+        # cve_csv_gz_filename='cve-allitems-'+today_str+'.csv.gz'
+        self._rhsa2cve_dict_filename='rhsamapcpe-'+today_str+'.txt'
+        self._cpe_dict_filename='cpe-dictionary.xml'
         
         # print(a)
         # print(cve_filter)
     
         self._failed_csv_filename='compiled/failed-'+today_str+'.csv'
         self._fixed_list_filename='compiled/fixed-'+today_str+'.txt'
+        self._check_script_filename='compiled/check-'+today_str+'.sh'
+        self.flags.default_compiled_filenames=True
     
+    
+        # return (cve_csv_gz_filename,rhsa2cve_filename,cpe_dict_filename)
+
+    def setupFiles(self):
+        ## should be called after everything else is parsed and settled
         try:
-            os.mkdir('compiled')
+            if self.flags.default_compiled_filenames:
+                os.mkdir('compiled')
         except OSError:
             # directory exists, it's fine
             pass
-    
-        fetch(CVE_ALLITEMS_GZ_URL,cve_csv_gz_filename)
-        fetch(RHSA_MAP_CPE_TXT_URL,rhsa2cve_filename)
-        fetch(CPE_DICT_URL,cpe_dict_filename)
-        return (cve_csv_gz_filename,rhsa2cve_filename,cpe_dict_filename)
+        fetch(CVE_ALLITEMS_GZ_URL,self._cve_dict_filename)
+        fetch(RHSA_MAP_CPE_TXT_URL,self._rhsa2cve_dict_filename)
+        fetch(CPE_DICT_URL,self._cpe_dict_filename)
+
 
     def createParser(self):
         parser = argparse.ArgumentParser(description='RHSA & CVE cross-reference tool')
@@ -373,15 +386,20 @@ class CheckApplication(object):
                             const=True,default=False,required=False)
         parser.add_argument('--print-brief','-b',help="Print brief general report",action='store_const',
                             const=True,default=False,required=False)
-        parser.add_argument('--compile-failed','-F',help="Compile list of failed entries",action='store_const',
-                            const=True,default=False,required=False)
-        parser.add_argument('--compile-fixed','-f',help="Compile list of addressed entries",action='store_const',
-                            const=True,default=False,required=False)
+
+        parser.add_argument('--compile-failed','-F',type=str, nargs='?',help="Compile list of failed entries",
+                            const=self._failed_csv_filename,default=None,required=False)
+        parser.add_argument('--compile-fixed','-f',type=str, nargs='?', help="Compile list of addressed entries",
+                            const=self._fixed_list_filename,default=None,required=False)
+
+        parser.add_argument('--compile-check-script','-s',type=str, nargs='?',help="Compile script to run on checked host",
+                            const=self._check_script_filename,default=None,required=False)
 
         self._app_parser=parser
         return self._app_parser
         
     def _parseArgs(self,argv):
+        ## defaults must be set before calling this method
         args = self._app_parser.parse_args(argv)
         self._app_args=args
 
@@ -399,17 +417,44 @@ class CheckApplication(object):
             
         self.flags.print_package_report=args.print_packages
         self.flags.print_brief_report=args.print_brief
-        self.flags.compile_failed=args.compile_failed
-        self.flags.compile_fixed=args.compile_fixed
+        
+        self.flags.default_compiled_filenames=False
+        if args.compile_failed:
+            self.flags.compile_failed=True
+            if self._failed_csv_filename == args.compile_failed:
+                self.flags.default_compiled_filenames=True
+            self._failed_csv_filename=args.compile_failed
+        else:
+            self.flags.compile_failed=False
+            
+        if args.compile_fixed:
+            self.flags.compile_fixed=True
+            if self._fixed_list_filename == args.compile_fixed:
+                self.flags.default_compiled_filenames=True
+            self._fixed_list_filename=args.compile_fixed
+        else:
+            self.flags.compile_fixed=False
+            
+        if args.compile_check_script:
+            self.flags.compile_check_script=True
+            if self._check_script_filename == args.compile_check_script:
+                self.flags.default_compiled_filenames=True
+            self._check_script_filename=args.compile_check_script
+        else:
+            self.flags.compile_check_script=False
 
     def __init__(self,argv):
          
         self._app_flags=Flags()
-        self.createParser()
-
-        self._parseArgs(argv[1:])
         
-        (cve_csv_gz_filename,rhsa2cve_filename,cpe_dict_filename)=self.setupFiles()
+        self.setDefaults()
+
+        self.createParser()
+       
+        self._parseArgs(argv[1:])
+
+        self.setupFiles()
+        
 
         with open(self._cve_candidates_filename,'r') as f:
             cve_list_str=f.read()
@@ -418,16 +463,16 @@ class CheckApplication(object):
         # into CVE items:
         self._cve_filter=cve_list_str.split()
 
-        cpe=CPEDict(cpe_dict_filename)
+        cpe=CPEDict(self._cpe_dict_filename)
         cve=CVEList()
         cve.setLoadFilter(self._cve_filter)
-        cve.load_gz(cve_csv_gz_filename)
+        cve.load_gz(self._cve_dict_filename)
         rhsa=Rhsa2CveMap()
         rhsa.setLoadFilter(self._cve_filter)
         if self.flags.cpe_filtered:
             # rhsa.setLoadCPEFilter(['cpe:/o:redhat:enterprise_linux'])
             rhsa.setLoadCPEFilter(self._cpe_filter)
-        rhsa.load(rhsa2cve_filename)
+        rhsa.load(self._rhsa2cve_dict_filename)
         
         self._cpe_dict=cpe
         self._cve_dict=cve
@@ -488,6 +533,16 @@ class CheckApplication(object):
             for (cve_id,status,rhsa_list,pkg_list) in report:
                 if status:
                     print(cve_id,",".join(rhsa_list),",".join(pkg_list),file=f)
+
+    def createCheckScript(self, cr, report):
+        ##TODO
+        # we need to implement real method here...
+        with open(self._check_script_filename,'w') as check_scr:
+            pkg_cve = cr.get_package_cve_map(report)
+            for pkg in pkg_cve.keys():
+                for cve in pkg_cve[pkg]:
+                    check_str="if rpm --changelog -q {0} | grep -qF '{1} ; then echo '{0}: {1} FIXED'; else echo '{0}: {1} FAILED'".format(pkg,cve)
+                    print(check_str,file=check_scr)
         
     def createCveReportFiles(self,cra=None,cve_report=None):
         report, cr = self._processDefaults(cra, cve_report)
@@ -496,6 +551,8 @@ class CheckApplication(object):
             self.createFailedFile(report)
         if self.flags.compile_fixed:
             self.createFixedFile(report)
+        if self.flags.compile_check_script:
+            self.createCheckScript(cr,report)
         
 
 if __name__ == '__main__':

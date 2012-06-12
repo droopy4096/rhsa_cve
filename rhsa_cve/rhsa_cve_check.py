@@ -312,7 +312,8 @@ class CheckApplication(object):
 
     _failed_csv_filename=None
     _fixed_list_filename=None
-    _check_script_filename=None
+    _check_cve_script_filename=None
+    _check_pkg_script_filename=None
     
     
     _cpe_filter=None
@@ -357,7 +358,8 @@ class CheckApplication(object):
     
         self._failed_csv_filename='compiled/failed-'+today_str+'.csv'
         self._fixed_list_filename='compiled/fixed-'+today_str+'.txt'
-        self._check_script_filename='compiled/check-'+today_str+'.sh'
+        self._check_cve_script_filename='compiled/check-cve-'+today_str+'.sh'
+        self._check_pkg_script_filename='compiled/check-pkg'+today_str+'.sh'
         self.flags.default_compiled_filenames=True
     
     
@@ -392,8 +394,11 @@ class CheckApplication(object):
         parser.add_argument('--compile-fixed','-f',type=str, nargs='?', help="Compile list of addressed entries",
                             const=self._fixed_list_filename,default=None,required=False)
 
-        parser.add_argument('--compile-check-script','-s',type=str, nargs='?',help="Compile script to run on checked host",
-                            const=self._check_script_filename,default=None,required=False)
+        parser.add_argument('--compile-cve-check-script','-s',type=str, nargs='?',help="Compile script to run on checked host",
+                            metavar='CVE_SCRIPT_NAME',const=self._check_cve_script_filename,default=None,required=False)
+
+        parser.add_argument('--compile-pkg-check-script','-S',type=str, nargs='?',help="Compile script to run on checked host",
+                            metavar='PKG_SCRIPT_NAME',const=self._check_pkg_script_filename,default=None,required=False)
 
         self._app_parser=parser
         return self._app_parser
@@ -435,13 +440,21 @@ class CheckApplication(object):
         else:
             self.flags.compile_fixed=False
             
-        if args.compile_check_script:
-            self.flags.compile_check_script=True
-            if self._check_script_filename == args.compile_check_script:
+        if args.compile_cve_check_script:
+            self.flags.compile_cve_check_script=True
+            if self._check_cve_script_filename == args.compile_cve_check_script:
                 self.flags.default_compiled_filenames=True
-            self._check_script_filename=args.compile_check_script
+            self._check_cve_script_filename=args.compile_cve_check_script
         else:
-            self.flags.compile_check_script=False
+            self.flags.compile_cve_check_script=False
+        
+        if args.compile_pkg_check_script:
+            self.flags.compile_pkg_check_script=True
+            if self._check_pkg_script_filename == args.compile_pkg_check_script:
+                self.flags.default_compiled_filenames=True
+            self._check_pkg_script_filename=args.compile_pkg_check_script
+        else:
+            self.flags.compile_pkg_check_script=False
 
     def __init__(self,argv):
          
@@ -534,10 +547,22 @@ class CheckApplication(object):
                 if status:
                     print(cve_id,",".join(rhsa_list),",".join(pkg_list),file=f)
 
-    def createCheckScript(self, cr, report):
+    def createPackageCheckScript(self, cr, report):
         ##TODO
         # we need to implement real method here...
         #
+        with open(self._check_pkg_script_filename,'w') as check_scr:
+            pkg_cve = cr.get_package_cve_map(report)
+            for pkg in pkg_cve.keys():
+                cond_str="if rpm -q --quiet {0} ; then {{".format(pkg)
+                print(cond_str,file=check_scr)
+                for cve in pkg_cve[pkg]:
+                    check_str="if rpm --changelog -q {0} | grep -qF '{1}' ; then echo '{0}: {1} FIXED'; else echo '{0}: {1} FAILED'; fi".format(pkg,cve)
+                    print(check_str,file=check_scr)
+                    
+                print("} else echo '"+pkg+": not installed'; fi",file=check_scr)
+        
+    def createCveCheckScript(self, cr, report):
         # for c in cve
         #   print $c
         #   for p in pkg_cve.keys()
@@ -548,16 +573,22 @@ class CheckApplication(object):
         #             print NOT FIXED
         #       else
         #          print as per RHSA $X $p is not installed to satisfy $c
-        with open(self._check_script_filename,'w') as check_scr:
-            pkg_cve = cr.get_package_cve_map(report)
-            for pkg in pkg_cve.keys():
-                cond_str="if rpm -q --quiet {0} ; then {{".format(pkg)
-                print(cond_str,file=check_scr)
-                for cve in pkg_cve[pkg]:
-                    check_str="rpm -q --quiet {0} && if rpm --changelog -q {0} | grep -qF '{1}' ; then echo '{0}: {1} FIXED'; else echo '{0}: {1} FAILED'; fi".format(pkg,cve)
-                    print(check_str,file=check_scr)
-                    
-                print("} else echo '"+pkg+": not installed'; fi",file=check_scr)
+        with open(self._check_cve_script_filename,'w') as check_scr:
+            for (cve_id,status,rhsa_list,pkg_list) in report:
+                if not status:
+                    ## CVE doesn't map to RHSA
+                    print("echo '{0}: is not covered by RHSA'".format(cve_id),file=check_scr)
+                else:
+                    ## CVE mapped to RHSA-list
+                    if not pkg_list:
+                        print('echo "{0}: can\'t find associated packages via RHSA"'.format(cve_id),file=check_scr)
+                    for pkg in pkg_list:
+                        ## walk the pkg_list now
+                        cond_str="if rpm -q --quiet {0} ; then {{".format(pkg)
+                        print(cond_str,file=check_scr)
+                        check_str="if rpm --changelog -q {0} | grep -qF '{1}' ; then echo '{1}: {0} FIXED'; else echo '{1}: {0} FAILED'; fi".format(pkg,cve_id)
+                        print(check_str,file=check_scr)
+                        print("} else echo '"+pkg+": not installed'; fi",file=check_scr)
         
     def createCveReportFiles(self,cra=None,cve_report=None):
         report, cr = self._processDefaults(cra, cve_report)
@@ -566,8 +597,8 @@ class CheckApplication(object):
             self.createFailedFile(report)
         if self.flags.compile_fixed:
             self.createFixedFile(report)
-        if self.flags.compile_check_script:
-            self.createCheckScript(cr,report)
+        if self.flags.compile_cve_check_script:
+            self.createCveCheckScript(cr,report)
         
 
 if __name__ == '__main__':

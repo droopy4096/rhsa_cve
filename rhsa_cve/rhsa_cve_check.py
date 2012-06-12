@@ -138,7 +138,7 @@ class Rhsa2CveMap(UserDict):
                     except ValueError:
                         ed=elements[-1]
                         package=None
-                        print("ERROR: can't parse: ",c)
+                        print("WARNING: can't parse: ",c)
                         continue
                     t=elements[:-1]+[ed]
                     cpe_lookup=":".join(t)
@@ -537,6 +537,17 @@ class CheckApplication(object):
     def createCheckScript(self, cr, report):
         ##TODO
         # we need to implement real method here...
+        #
+        # for c in cve
+        #   print $c
+        #   for p in pkg_cve.keys()
+        #       if package_installed:
+        #          if grep $c rpm-changelog $p
+        #             print FIXED
+        #          else
+        #             print NOT FIXED
+        #       else
+        #          print as per RHSA $X $p is not installed to satisfy $c
         with open(self._check_script_filename,'w') as check_scr:
             pkg_cve = cr.get_package_cve_map(report)
             for pkg in pkg_cve.keys():

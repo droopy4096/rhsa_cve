@@ -586,7 +586,8 @@ class CheckApplication(object):
                         ## walk the pkg_list now
                         cond_str="if rpm -q --quiet {0} ; then {{".format(pkg)
                         print(cond_str,file=check_scr)
-                        check_str="if rpm --changelog -q {0} | grep -qF '{1}' ; then echo '{1}: {0} FIXED'; else echo '{1}: {0} FAILED'; fi".format(pkg,cve_id)
+                        # check_str="if rpm --changelog -q {0} | grep -qF '{1}' ; then echo '{1}: {0} {2} FIXED'; else for r in {3} ; do if rpm --changelog -q {0}  | grep -qF $r ; then  echo '{1}: {0} {2} FIXED; else '{1}: {0} {2} FAILED'; fi; done; fi".format(pkg,cve_id,",".join(rhsa_list)," ".join(rhsa_list))
+                        check_str="if rpm --changelog -q {0} | grep -qF '{1}' ; then echo '{1}: {0} {2} FIXED'; else echo '{1}: {0} {2} FAILED'; fi".format(pkg,cve_id,",".join(rhsa_list))
                         print(check_str,file=check_scr)
                         print("} else echo '"+pkg+": not installed'; fi",file=check_scr)
         

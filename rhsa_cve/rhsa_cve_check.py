@@ -3,7 +3,7 @@
 from __future__ import print_function
 
 import sys
-import os, os.path
+import os.path
 import urllib2
 import datetime
 
@@ -87,14 +87,14 @@ class Rhsa2CveMap(UserDict):
             self.load(filename)
         self._filter=None
 
-    def setLoadFilter(self,filter):
+    def setLoadFilter(self,lfilter):
         """List only items that match filter"""
-        self._filter=filter
+        self._filter=lfilter
 
-    def setLoadCPEFilter(self,filter):
+    def setLoadCPEFilter(self,lfilter):
         """List only items that fuzzy-match filter:
         start with the same string"""
-        self._cpe_filter=filter
+        self._cpe_filter=lfilter
 
 
 
@@ -159,9 +159,9 @@ class CVEList(UserDict):
         self._filter=None
         self._ref_re=re.compile(r' +\| +')
 
-    def setLoadFilter(self,filter):
+    def setLoadFilter(self,lfilter):
         """List only items that match filter"""
-        self._filter=filter
+        self._filter=lfilter
 
     def load(self,filename):
         with open(filename,'r') as f:
@@ -172,8 +172,8 @@ class CVEList(UserDict):
             self._load(f)
         
 
-    def _load(self,file):
-        reader=csv.reader(file)
+    def _load(self,file_handle):
+        reader=csv.reader(file_handle)
         ## 1. read line #3  for field names
         ## 2. read the rest of the file after empty line
         
@@ -210,8 +210,8 @@ class CPEDict(UserDict):
             
         self._filter=None
 
-    def setLoadFilter(self,filter):
-        self._filter=filter
+    def setLoadFilter(self,lfilter):
+        self._filter=lfilter
         
     def load(self,filename):
         # cpe_tree=ElementTree()
@@ -249,7 +249,7 @@ class CveRhsaAnalyzer(object):
         Returns tuple: (CVE-ID:str,Fixed:bool,RHSA:list,pkgs:set)"""
         #TODO add ability to generate package->CVE list for automated checking  
         cve=self._cve_dict
-        cpe=self._cpe_dict
+        # cpe=self._cpe_dict
         rhsa2cve=self._rhsa2cve_dict
         
         rev_map={}
@@ -284,9 +284,9 @@ class CveRhsaAnalyzer(object):
         # for p in packages:
         #   login to server
         #   rpm --changelog -q $p | grep $cve 
-        cve=self._cve_dict
-        cpe=self._cpe_dict
-        rhsa2cve=self._rhsa2cve_dict
+        # cve=self._cve_dict
+        # cpe=self._cpe_dict
+        # rhsa2cve=self._rhsa2cve_dict
         pkg_dict={}
         if not cve_report:
             cve_report=self.get_cve_compliance_report()

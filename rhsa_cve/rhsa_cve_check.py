@@ -540,9 +540,13 @@ class CheckApplication(object):
         with open(self._check_script_filename,'w') as check_scr:
             pkg_cve = cr.get_package_cve_map(report)
             for pkg in pkg_cve.keys():
+                cond_str="if rpm -q --quiet {0} ; then {{".format(pkg)
+                print(cond_str,file=check_scr)
                 for cve in pkg_cve[pkg]:
-                    check_str="if rpm --changelog -q {0} | grep -qF '{1} ; then echo '{0}: {1} FIXED'; else echo '{0}: {1} FAILED'".format(pkg,cve)
+                    check_str="rpm -q --quiet {0} && if rpm --changelog -q {0} | grep -qF '{1}' ; then echo '{0}: {1} FIXED'; else echo '{0}: {1} FAILED'; fi".format(pkg,cve)
                     print(check_str,file=check_scr)
+                    
+                print("} else echo '"+pkg+": not installed'; fi",file=check_scr)
         
     def createCveReportFiles(self,cra=None,cve_report=None):
         report, cr = self._processDefaults(cra, cve_report)

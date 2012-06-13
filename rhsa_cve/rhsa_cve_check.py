@@ -28,27 +28,36 @@ CPE_DICT_URL='https://www.redhat.com/security/data/metrics/cpe-dictionary.xml'
 
 CVE_SCRIPT_PROLOG="""#!/bin/sh
 
+print_report(){
+    CVE=$1
+    PKG=$2
+    RHSA=$3
+    STATUS=$4
+    echo "$CVE: $PKG ($RHSA) $STATUS"
+}
+
 check_cve(){
     PKG=$1
     CVE=$2
     RHSA_RE=$3
+    RHSA=$4
     if rpm --quiet -q $PKG
     then
         if rpm --changelog -q $PKG | grep -q $CVE
            then
                 # CVE fixed
-                echo "$CVE: $PKG FIXED"
+                print_report $CVE $PKG $RHSA FIXED
            else
                 # need to fallback to RHSA
                 if rpm --changelog -q $PKG | grep -qe "$RHSA_RE"
                     then
-                        echo "$CVE: $PKG (RHSA) FIXED"
+                        print_report "$CVE" "$PKG" "$RHSA" FIXED
                     else
-                        echo "$CVE: $PKG FAILED"
+                        print_report "$CVE" "$PKG" "" FAILED
                 fi
         fi
     else
-        echo "$PKG not installed"
+        print_report $CVE $PKG $RHSA "N/I"
     fi
 }
 """
@@ -638,11 +647,12 @@ class CheckApplication(object):
                 else:
                     ## CVE mapped to RHSA-list
                     if not pkg_list:
-                        print('echo "{0}: can\'t find associated packages via RHSA"'.format(cve_id),file=check_scr)
+                        print('print_report {0} "" "" "can\'t find associated packages via RHSA"'.format(cve_id),file=check_scr)
                     for pkg in pkg_list:
                         ## walk the pkg_list now
                         rhsa_re='\('+'\|'.join(rhsa_list)+'\)'
-                        check_str="check_cve {0} {1} '{2}'".format(pkg, cve_id, rhsa_re)
+                        rhsa_str=",".join(rhsa_list)
+                        check_str="check_cve {0} {1} '{2}' {3}".format(pkg, cve_id, rhsa_re,rhsa_str)
                         print(check_str,file=check_scr)
         
     def createCveReportFiles(self,cra=None,cve_report=None):

@@ -33,32 +33,54 @@ print_report(){
     PKG=$2
     RHSA=$3
     STATUS=$4
-    echo "$CVE: $PKG ($RHSA) $STATUS"
+    echo -e "${CVE}\t${PKG}\t(${RHSA})\t${STATUS}"
 }
 
 check_cve(){
     PKG=$1
     CVE=$2
-    RHSA_RE=$3
-    RHSA=$4
+    RHSA=$3
     if rpm --quiet -q $PKG
     then
-        if rpm --changelog -q $PKG | grep -q $CVE
+        PKG_VER=$(rpm -q $PKG)
+        CHANGELOG_FILE=$(mktemp ${PKG}.XXXXXX)
+        rpm --changelog -q $PKG > $CHANGELOG_FILE
+        if grep -q $CVE $CHANGELOG_FILE
            then
                 # CVE fixed
-                print_report $CVE $PKG $RHSA FIXED
+                print_report $CVE $PKG_VER $RHSA FIXED
            else
                 # need to fallback to RHSA
-                if rpm --changelog -q $PKG | grep -qe "$RHSA_RE"
+                MY_RHSA=""
+                old_IFS=$IFS
+                IFS=','
+                for r in $RHSA
+                  do
+                    if grep -qF $r $CHANGELOG_FILE
+                        then
+                          my_add="*${r}*"
+                          
+                        else
+                          my_add="${r}"
+                    fi
+                    if [ -n "$MY_RHSA" ] 
+                      then MY_RHSA="$MY_RHSA,${my_add}"
+                      else MY_RHSA=$my_add
+                    fi
+                  done
+                  IFS=$old_IFS
+                if echo "$MY_RHSA" | grep -qF "*"
                     then
-                        print_report "$CVE" "$PKG" "$RHSA" FIXED
+                        print_report "$CVE" "$PKG_VER" "$MY_RHSA" FIXED
                     else
-                        print_report "$CVE" "$PKG" "" FAILED
+                        print_report "$CVE" "$PKG_VER" "$MY_RHSA" FAILED
                 fi
         fi
+        rm $CHANGELOG_FILE
     else
         print_report $CVE $PKG $RHSA "N/I"
     fi
+    
 }
 """
 
@@ -598,35 +620,6 @@ class CheckApplication(object):
                     
                 print("} else echo '"+pkg+": not installed'; fi",file=check_scr)
         
-    def createCveCheckScript2(self, cr, report):
-        # for c in cve
-        #   print $c
-        #   for p in pkg_cve.keys()
-        #       if package_installed:
-        #          if grep $c rpm-changelog $p
-        #             print FIXED
-        #          else
-        #             print NOT FIXED
-        #       else
-        #          print as per RHSA $X $p is not installed to satisfy $c
-        with open(self._check_cve_script_filename,'w') as check_scr:
-            for (cve_id,status,rhsa_list,pkg_list) in report:
-                if not status:
-                    ## CVE doesn't map to RHSA
-                    print("echo '{0}: is not covered by RHSA'".format(cve_id),file=check_scr)
-                else:
-                    ## CVE mapped to RHSA-list
-                    if not pkg_list:
-                        print('echo "{0}: can\'t find associated packages via RHSA"'.format(cve_id),file=check_scr)
-                    for pkg in pkg_list:
-                        ## walk the pkg_list now
-                        cond_str="if rpm -q --quiet {0} ; then {{".format(pkg)
-                        print(cond_str,file=check_scr)
-                        # check_str="if rpm --changelog -q {0} | grep -qF '{1}' ; then echo '{1}: {0} {2} FIXED'; else for r in {3} ; do if rpm --changelog -q {0}  | grep -qF $r ; then  echo '{1}: {0} {2} FIXED; else '{1}: {0} {2} FAILED'; fi; done; fi".format(pkg,cve_id,",".join(rhsa_list)," ".join(rhsa_list))
-                        check_str="if rpm --changelog -q {0} | grep -qF '{1}' ; then echo '{1}: {0} {2} FIXED'; else echo '{1}: {0} {2} FAILED'; fi".format(pkg,cve_id,",".join(rhsa_list))
-                        print(check_str,file=check_scr)
-                        print("} else echo '"+pkg+": not installed'; fi",file=check_scr)
-        
     def createCveCheckScript(self, cr, report):
         # for c in cve
         #   print $c
@@ -650,9 +643,9 @@ class CheckApplication(object):
                         print('print_report {0} "" "" "can\'t find associated packages via RHSA"'.format(cve_id),file=check_scr)
                     for pkg in pkg_list:
                         ## walk the pkg_list now
-                        rhsa_re='\('+'\|'.join(rhsa_list)+'\)'
+                        # rhsa_re='\('+'\|'.join(rhsa_list)+'\)'
                         rhsa_str=",".join(rhsa_list)
-                        check_str="check_cve {0} {1} '{2}' {3}".format(pkg, cve_id, rhsa_re,rhsa_str)
+                        check_str="check_cve {0} {1} {2}".format(pkg, cve_id,rhsa_str)
                         print(check_str,file=check_scr)
         
     def createCveReportFiles(self,cra=None,cve_report=None):

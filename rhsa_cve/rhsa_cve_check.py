@@ -26,6 +26,33 @@ CVE_ALLITEMS_GZ_URL='http://cve.mitre.org/data/downloads/allitems.csv.gz'
 RHSA_MAP_CPE_TXT_URL='https://www.redhat.com/security/data/metrics/rhsamapcpe.txt'
 CPE_DICT_URL='https://www.redhat.com/security/data/metrics/cpe-dictionary.xml'
 
+CVE_SCRIPT_PROLOG="""#!/bin/sh
+
+check_cve(){
+    PKG=$1
+    CVE=$2
+    RHSA_RE=$3
+    if rpm --quiet -q $PKG
+    then
+        if rpm --changelog -q $PKG | grep -q $CVE
+           then
+                # CVE fixed
+                echo "$CVE: $PKG FIXED"
+           else
+                # need to fallback to RHSA
+                if rpm --changelog -q $PKG | grep -qe "$RHSA_RE"
+                    then
+                        echo "$CVE: $PKG (RHSA) FIXED"
+                    else
+                        echo "$CVE: $PKG FAILED"
+                fi
+        fi
+    else
+        echo "$PKG not installed"
+    fi
+}
+"""
+
 def fetch(url,filename,force=False):
     if not os.path.exists(filename) or force:
         # fetch CVE stuff
@@ -562,7 +589,7 @@ class CheckApplication(object):
                     
                 print("} else echo '"+pkg+": not installed'; fi",file=check_scr)
         
-    def createCveCheckScript(self, cr, report):
+    def createCveCheckScript2(self, cr, report):
         # for c in cve
         #   print $c
         #   for p in pkg_cve.keys()
@@ -590,6 +617,33 @@ class CheckApplication(object):
                         check_str="if rpm --changelog -q {0} | grep -qF '{1}' ; then echo '{1}: {0} {2} FIXED'; else echo '{1}: {0} {2} FAILED'; fi".format(pkg,cve_id,",".join(rhsa_list))
                         print(check_str,file=check_scr)
                         print("} else echo '"+pkg+": not installed'; fi",file=check_scr)
+        
+    def createCveCheckScript(self, cr, report):
+        # for c in cve
+        #   print $c
+        #   for p in pkg_cve.keys()
+        #       if package_installed:
+        #          if grep $c rpm-changelog $p
+        #             print FIXED
+        #          else
+        #             print NOT FIXED
+        #       else
+        #          print as per RHSA $X $p is not installed to satisfy $c
+        with open(self._check_cve_script_filename,'w') as check_scr:
+            print(CVE_SCRIPT_PROLOG,file=check_scr)
+            for (cve_id,status,rhsa_list,pkg_list) in report:
+                if not status:
+                    ## CVE doesn't map to RHSA
+                    print("echo '{0}: is not covered by RHSA'".format(cve_id),file=check_scr)
+                else:
+                    ## CVE mapped to RHSA-list
+                    if not pkg_list:
+                        print('echo "{0}: can\'t find associated packages via RHSA"'.format(cve_id),file=check_scr)
+                    for pkg in pkg_list:
+                        ## walk the pkg_list now
+                        rhsa_re='\('+'\|'.join(rhsa_list)+'\)'
+                        check_str="check_cve {0} {1} '{2}'".format(pkg, cve_id, rhsa_re)
+                        print(check_str,file=check_scr)
         
     def createCveReportFiles(self,cra=None,cve_report=None):
         report, cr = self._processDefaults(cra, cve_report)

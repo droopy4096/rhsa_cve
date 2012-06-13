@@ -643,7 +643,7 @@ class CheckApplication(object):
             for (cve_id,status,rhsa_list,pkg_list) in report:
                 if not status:
                     ## CVE doesn't map to RHSA
-                    print("echo '{0}: is not covered by RHSA'".format(cve_id),file=check_scr)
+                    print('print_report {0} "" "" "is not covered by RHSA"'.format(cve_id),file=check_scr)
                 else:
                     ## CVE mapped to RHSA-list
                     if not pkg_list:
